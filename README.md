@@ -9,5 +9,5 @@ Join the discussion at
 
 ## Origin
 
-This app was formed from [HTTP Toolkit's Android
+This app was forked from [HTTP Toolkit's Android
 application](https://github.com/httptoolkit/httptoolkit-android).
