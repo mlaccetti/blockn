@@ -4,7 +4,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
-import kotlinx.android.synthetic.main.item_port_row.view.*
+import rckt.blockn.databinding.ItemAppRowBinding
+import rckt.blockn.databinding.ItemPortRowBinding
 
 val PORT_DESCRIPTIONS = mapOf(
   80 to "Standard HTTP port",
@@ -26,9 +27,8 @@ class PortListAdapter(
 ) : RecyclerView.Adapter<PortListAdapter.PortViewHolder>() {
 
   override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PortViewHolder {
-    return PortViewHolder(
-      LayoutInflater.from(parent.context).inflate(R.layout.item_port_row, parent, false)
-    )
+    val binding = ItemPortRowBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+    return PortViewHolder(binding)
   }
 
   override fun getItemCount() = ports.size
@@ -37,17 +37,16 @@ class PortListAdapter(
     holder.bind(ports.elementAt(position))
   }
 
-  inner class PortViewHolder(v: View) : RecyclerView.ViewHolder(v) {
-
+  inner class PortViewHolder(val binding: ItemPortRowBinding) : RecyclerView.ViewHolder(binding.root) {
     init {
-      itemView.row_port_delete.setOnClickListener { _ ->
+      binding.rowPortDelete.setOnClickListener { _ ->
         onPortDeleted(ports.elementAt(layoutPosition))
       }
     }
 
     fun bind(port: Int) {
-      itemView.row_port.text = port.toString()
-      itemView.row_port_description.text = PORT_DESCRIPTIONS[port]
+      binding.rowPort.text = port.toString()
+      binding.rowPortDescription.text = PORT_DESCRIPTIONS[port]
         ?: "Unknown port";
     }
   }

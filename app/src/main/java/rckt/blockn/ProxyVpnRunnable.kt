@@ -2,7 +2,6 @@ package rckt.blockn
 
 import android.os.ParcelFileDescriptor
 import android.util.Log
-import android.util.SparseArray
 import io.sentry.Sentry
 import rckt.blockn.vpn.ClientPacketWriter
 import rckt.blockn.vpn.SessionHandler
@@ -13,19 +12,14 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InterruptedIOException
 import java.net.ConnectException
-import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 
 // Set on our VPN as the MTU, which should guarantee all packets fit this
 const val MAX_PACKET_LEN = 1500
 
 class ProxyVpnRunnable(
-  vpnInterface: ParcelFileDescriptor,
-  proxyHost: String,
-  proxyPort: Int,
-  redirectPorts: IntArray
+  vpnInterface: ParcelFileDescriptor
 ) : Runnable {
-
   @Volatile
   private var running = false
 
@@ -50,13 +44,6 @@ class ProxyVpnRunnable(
   // Allocate the buffer for a single packet.
   private val packet = ByteBuffer.allocate(MAX_PACKET_LEN)
 
-  // Our redirect rules, defining which traffic should be forwarded to what proxy address
-  private val portRedirections = SparseArray<InetSocketAddress>().apply {
-    val proxyAddress = InetSocketAddress(proxyHost, proxyPort)
-    redirectPorts.forEach {
-      append(it, proxyAddress)
-    }
-  }
 
   override fun run() {
     if (running) {
@@ -65,8 +52,6 @@ class ProxyVpnRunnable(
     }
 
     Log.i(TAG, "Vpn thread starting")
-
-    manager.setTcpPortRedirections(portRedirections)
     dataServiceThread.start()
     vpnPacketWriterThread.start()
 

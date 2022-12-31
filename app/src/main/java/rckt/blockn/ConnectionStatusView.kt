@@ -15,24 +15,13 @@ private val isLineageOs = Build.HOST.startsWith("lineage")
 
 class ConnectionStatusView(
   context: Context,
-  proxyConfig: ProxyConfig,
   totalAppCount: Int,
   interceptedAppCount: Int,
   changeApps: () -> Unit,
-  interceptedPorts: Set<Int>,
-  changePorts: () -> Unit
 ) : LinearLayout(context) {
 
   init {
-    val layout = when (whereIsCertTrusted(proxyConfig)) {
-      "user" ->
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N)
-          R.layout.connection_status_pre_v7
-        else
-          R.layout.connection_status_user
-      "system" -> R.layout.connection_status_system
-      else -> R.layout.connection_status_none
-    }
+    val layout = R.layout.connection_status_none
     LayoutInflater.from(context).inflate(layout, this, true)
 
     if (layout == R.layout.connection_status_user) {
@@ -42,15 +31,7 @@ class ConnectionStatusView(
     }
 
     val connectedToText = findViewById<TextView>(R.id.connectedTo)
-    connectedToText.text = if (proxyConfig.ip == "127.0.0.1") {
-      context.getString(R.string.connected_tunnel_details)
-    } else {
-      context.getString(
-        R.string.connected_details,
-        proxyConfig.ip,
-        proxyConfig.port
-      )
-    }
+    connectedToText.text = context.getString(R.string.connected_tunnel_details)
 
     val appInterceptionStatus = findViewById<MaterialCardView>(R.id.interceptedAppsButton)
     appInterceptionStatus.setOnClickListener { _ ->
@@ -90,20 +71,5 @@ class ConnectionStatusView(
       interceptedAppCount,
       if (interceptedAppCount != 1) "s" else ""
     )
-
-    val portInterceptionStatus = findViewById<MaterialCardView>(R.id.interceptedPortsButton)
-    portInterceptionStatus.setOnClickListener { _ -> changePorts() }
-
-    val portInterceptionStatusText = findViewById<TextView>(R.id.interceptedPortsStatus)
-    portInterceptionStatusText.text = context.getString(
-      when {
-        (interceptedPorts == DEFAULT_PORTS) -> R.string.default_ports
-        interceptedPorts.size > 10 -> R.string.selected_ports
-        else -> R.string.few_ports
-      },
-      interceptedPorts.size,
-      if (interceptedPorts.size != 1) "s" else ""
-    )
   }
-
 }

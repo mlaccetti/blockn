@@ -50,8 +50,7 @@ public class SessionManager implements ICloseSession {
 
   private final String TAG = TagKt.getTAG(this);
   private final Map<String, Session> table = new ConcurrentHashMap<>();
-  private SocketProtector protector = SocketProtector.getInstance();
-  private SparseArray<InetSocketAddress> tcpPortRedirection = new SparseArray<>();
+  private final SocketProtector protector = SocketProtector.getInstance();
 
   /**
    * keep java garbage collector from collecting a session
@@ -193,20 +192,14 @@ public class SessionManager implements ICloseSession {
     // Initiate connection straight away, to reduce latency
     // We use the real address, unless tcpPortRedirection redirects us to a different
     // target address for traffic on this port.
-    SocketAddress socketAddress = tcpPortRedirection.get(port) != null
-      ? tcpPortRedirection.get(port)
-      : new InetSocketAddress(ips, port);
+    SocketAddress socketAddress = new InetSocketAddress(ips, port);
 
-    Log.d(TAG, "Initiate connecting to remote tcp server: " + socketAddress.toString());
+    Log.d(TAG, "Initiate connecting to remote tcp server: " + socketAddress);
     boolean connected = channel.connect(socketAddress);
     session.setConnected(connected);
 
     table.put(key, session);
 
     return session;
-  }
-
-  public void setTcpPortRedirections(SparseArray<InetSocketAddress> tcpPortRedirection) {
-    this.tcpPortRedirection = tcpPortRedirection;
   }
 }

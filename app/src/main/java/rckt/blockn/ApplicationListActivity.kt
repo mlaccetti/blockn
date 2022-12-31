@@ -108,9 +108,9 @@ class ApplicationListActivity : AppCompatActivity(), SwipeRefreshLayout.OnRefres
 
   private suspend fun loadAllApps(): List<PackageInfo> =
     withContext(Dispatchers.IO) {
-      return@withContext packageManager.getInstalledPackages(PackageManager.GET_META_DATA).apply {
+      return@withContext packageManager.getInstalledPackages(PackageManager.MATCH_ALL).apply {
         sortBy { pkg ->
-          AppLabelCache.getAppLabel(packageManager, pkg.applicationInfo).toUpperCase(
+          AppLabelCache.getAppLabel(packageManager, pkg.applicationInfo).uppercase(
             Locale.getDefault()
           )
         }

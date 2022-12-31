@@ -7,21 +7,14 @@ import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
-import android.os.ParcelFileDescriptor
 import android.os.PowerManager
-import android.provider.MediaStore
 import android.provider.Settings
-import android.security.KeyChain
-import android.security.KeyChain.EXTRA_CERTIFICATE
-import android.security.KeyChain.EXTRA_NAME
-import android.text.Html
 import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.MainThread
-import androidx.annotation.RequiresApi
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.view.ContextThemeWrapper
@@ -30,17 +23,11 @@ import com.google.android.gms.common.GooglePlayServicesUtil
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.sentry.Sentry
 import kotlinx.coroutines.*
-import rckt.blockn.*
 import java.net.ConnectException
 import java.net.SocketTimeoutException
-import java.security.cert.Certificate
-import java.security.cert.X509Certificate
 
 const val START_VPN_REQUEST = 123
-const val INSTALL_CERT_REQUEST = 456
-const val SCAN_REQUEST = 789
 const val PICK_APPS_REQUEST = 499
-const val PICK_PORTS_REQUEST = 443
 
 enum class MainState {
   DISCONNECTED,
@@ -53,10 +40,7 @@ enum class MainState {
 private const val ACTIVATE_INTENT = "tech.httptoolkit.android.ACTIVATE"
 private const val DEACTIVATE_INTENT = "tech.httptoolkit.android.DEACTIVATE"
 
-private const val PROMPTED_CERT_SETUP_SUPPORTED = true;
-
 class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
-
   private lateinit var app: HttpToolkitApplication
 
   private var localBroadcastManager: LocalBroadcastManager? = null
@@ -64,11 +48,9 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     override fun onReceive(context: Context, intent: Intent) {
       if (intent.action == VPN_STARTED_BROADCAST) {
         mainState = MainState.CONNECTED
-        currentProxyConfig = intent.getParcelableExtra(PROXY_CONFIG_EXTRA)
         updateUi()
       } else if (intent.action == VPN_STOPPED_BROADCAST) {
         mainState = MainState.DISCONNECTED
-        currentProxyConfig = null
         updateUi()
       }
     }
@@ -76,9 +58,6 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
   private var mainState: MainState =
     if (isVpnActive()) MainState.CONNECTED else MainState.DISCONNECTED
-
-  // If connected/late-stage connecting, the proxy we're connected/trying to connect to. Otherwise null.
-  private var currentProxyConfig: ProxyConfig? = activeVpnConfig()
 
   // Used to track extremely fast VPN setup failures, indicating setup issues (rather than
   // manual user cancellation). Doesn't matter that it's not properly persistent.
@@ -111,7 +90,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
           firstRunParams != null &&
           firstRunParams.startsWith("https://android.httptoolkit.tech/connect/")
         ) {
-          launch { connectToVpnFromUrl(firstRunParams) }
+          launch { connectToVpn() }
         }
       }
     }
@@ -123,13 +102,6 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     if (app.popVpnKilledState() && !batteryOptimizationsDisabled) {
       // The app was killed last run, probably by battery optimizations: show a warning
       showVpnKilledAlert()
-    } else {
-      // Async check for updates, and maybe prompt the user if necessary (if using play store)
-      launch {
-        supervisorScope {
-          if (isStoreAvailable(this@MainActivity) && app.isUpdateRequired()) promptToUpdate()
-        }
-      }
     }
   }
 
@@ -167,7 +139,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
       // a separate barcode app anyway (or opened the QR code URL in a browser)
       intent.action == Intent.ACTION_VIEW -> {
         app.trackEvent("Setup", "action-view")
-        if (app.lastProxy != null && isVpnConfigured()) {
+        if (isVpnConfigured()) {
           Log.i(TAG, "Showing prompt for ACTION_VIEW intent")
 
           // If we were started from an intent (e.g. another barcode scanner/link), and we
@@ -183,7 +155,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
             )
             .setPositiveButton("Enable") { _, _ ->
               Log.i(TAG, "Prompt confirmed")
-              launch { connectToVpnFromUrl(intent.data!!) }
+              launch { connectToVpnFrom() }
             }
             .setNegativeButton("Cancel") { _, _ ->
               Log.i(TAG, "Prompt cancelled")
@@ -191,7 +163,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
             .show()
         } else {
           Log.i(TAG, "Launching from ACTION_VIEW intent")
-          launch { connectToVpnFromUrl(intent.data!!) }
+          launch { connectToVpnFrom() }
         }
       }
 
@@ -199,7 +171,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
       // Permission required, checked for via activity-alias in the manifest
       isRCIntent && intent.action == ACTIVATE_INTENT -> {
         app.trackEvent("Setup", "rc-activate")
-        launch { connectToVpnFromUrl(intent.data!!) }
+        launch { connectToVpnFrom() }
       }
       isRCIntent && intent.action == DEACTIVATE_INTENT -> {
         app.trackEvent("Setup", "rc-deactivate")
@@ -240,21 +212,13 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
         detailContainer.addView(detailText(R.string.disconnected_details))
 
         buttonContainer.visibility = View.VISIBLE
-        buttonContainer.addView(primaryButton(R.string.scan_button, ::scanCode))
-
-        val lastProxy = app.lastProxy
-        if (lastProxy != null) {
-          buttonContainer.addView(secondaryButton(R.string.reconnect_button) {
-            launch { reconnect(lastProxy) }
-          })
-        }
+        buttonContainer.addView(primaryButton(R.string.scan_button, ::connectToVPN))
       }
       MainState.CONNECTING -> {
         statusText.setText(R.string.connecting_status)
         buttonContainer.visibility = View.GONE
       }
       MainState.CONNECTED -> {
-        val proxyConfig = this.currentProxyConfig!!
         val totalAppCount = packageManager.getInstalledPackages(PackageManager.GET_META_DATA)
           .map { app -> app.packageName }
           .toSet()
@@ -266,12 +230,9 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
         detailContainer.addView(
           ConnectionStatusView(
             this,
-            proxyConfig,
             totalAppCount,
             interceptedAppsCount,
-            ::chooseApps,
-            app.interceptedPorts,
-            ::choosePorts
+            ::chooseApps
           )
         )
 
@@ -318,15 +279,15 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     return text
   }
 
-  private fun scanCode() {
+  private fun connectToVPN() {
     app.trackEvent("Button", "scan-code")
-    startActivityForResult(Intent(this, ScanActivity::class.java), SCAN_REQUEST)
+    launch { connectToVpnFrom() }
+    // startActivityForResult(Intent(this, ScanActivity::class.java), SCAN_REQUEST)
   }
 
-  private suspend fun connectToVpn(config: ProxyConfig) {
+  private suspend fun connectToVpn() {
     Log.i(TAG, "Connect to VPN")
 
-    this.currentProxyConfig = config
     this.mainState = MainState.CONNECTING
 
     withContext(Dispatchers.Main) { updateUi() }
@@ -336,35 +297,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     Log.i(TAG, if (vpnIntent != null) "got intent" else "no intent")
     val vpnNotConfigured = vpnIntent != null
 
-    if (whereIsCertTrusted(config) == null && PROMPTED_CERT_SETUP_SUPPORTED) {
-      // The cert isn't trusted, and the VPN may need setup, so there'll be a series of prompts
-      // here. Explain them beforehand, so users understand what's going on.
-      withContext(Dispatchers.Main) {
-        MaterialAlertDialogBuilder(this@MainActivity)
-          .setTitle("Enable interception")
-          .setIcon(R.drawable.ic_info_circle)
-          .setMessage(
-            "To intercept traffic from this device, you need to " +
-              (if (vpnNotConfigured) "activate HTTP Toolkit's VPN and " else "") +
-              "trust your HTTP Toolkit's certificate authority. " +
-              "\n\n" +
-              "Please accept the following prompts to allow this." +
-              if (!isDeviceSecured(applicationContext))
-                "\n\n" +
-                  "Due to Android security requirements, trusting the certificate will " +
-                  "require you to set a PIN, password or pattern for this device."
-              else " To trust the certificate, your device PIN will be required."
-          )
-          .setPositiveButton("Ok") { _, _ ->
-            if (vpnNotConfigured) {
-              startActivityForResult(vpnIntent, START_VPN_REQUEST)
-            } else {
-              onActivityResult(START_VPN_REQUEST, RESULT_OK, null)
-            }
-          }
-          .show()
-      }
-    } else if (vpnNotConfigured) {
+    if (vpnNotConfigured) {
       // In this case the VPN needs setup, but the cert is trusted already, so it's
       // a single confirmation. Pretty clear, no need to explain. This happens if the
       // VPN/app was removed from the device in the past, or when using injected system certs.
@@ -377,7 +310,6 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
   }
 
   private fun disconnect() {
-    currentProxyConfig = null
     mainState = MainState.DISCONNECTING
     updateUi()
 
@@ -387,7 +319,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     })
   }
 
-  private suspend fun reconnect(lastProxy: ProxyConfig) {
+  private suspend fun reconnect() {
     app.trackEvent("Button", "reconnect")
 
     withContext(Dispatchers.Main) {
@@ -396,19 +328,8 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     }
 
     try {
-      // Revalidates the config, to ensure the server is available (and drop retries if not)
-      val config = getProxyConfig(
-        ProxyInfo(
-          listOf(lastProxy.ip),
-          lastProxy.port,
-          null,
-          getCertificateFingerprint(lastProxy.certificate as X509Certificate)
-        )
-      )
-      connectToVpn(config)
+      connectToVpn()
     } catch (e: Exception) {
-      app.lastProxy = null
-
       Log.e(TAG, e.toString())
       e.printStackTrace()
 
@@ -427,7 +348,6 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
   private fun resetAfterFailure() {
     app.trackEvent("Button", "try-again")
-    currentProxyConfig = null
     mainState = MainState.DISCONNECTED
     updateUi()
   }
@@ -446,21 +366,8 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     )
   }
 
-  private fun choosePorts() {
-    startActivityForResult(
-      Intent(this, PortListActivity::class.java).apply {
-        putExtra(SELECTED_PORTS_EXTRA, app.interceptedPorts.toIntArray())
-      },
-      PICK_PORTS_REQUEST
-    )
-  }
-
   private fun testInterception() {
     app.trackEvent("Button", "test-interception")
-
-    val certIsSystemTrusted = whereIsCertTrusted(
-      this.currentProxyConfig!! // Safe!! because you can only run tests while connected
-    ) == "system"
 
     // If we have a system cert, in theory we could use any browser. In practice though, some
     // (i.e. Firefox) ignore system certs to use their own settings. It's best to try and ensure
@@ -468,7 +375,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     // is supported, so only matters if the default browser is not on our known-good list.
     val testBrowser = getTestBrowserPackage(this)
 
-    val canUseHttps = testBrowser != null || certIsSystemTrusted
+    val canUseHttps = testBrowser != null
 
     launchBrowser("amiusing.httptoolkit.tech", canUseHttps, testBrowser)
   }
@@ -509,43 +416,26 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     Log.i(
       TAG, when (requestCode) {
         START_VPN_REQUEST -> "start-vpn"
-        INSTALL_CERT_REQUEST -> "install-cert"
-        SCAN_REQUEST -> "scan-request"
         PICK_APPS_REQUEST -> "pick-apps"
-        PICK_PORTS_REQUEST -> "pick-ports"
         else -> requestCode.toString()
       }
     )
 
     Log.i(TAG, if (resultCode == RESULT_OK) "ok" else resultCode.toString())
-
-    val resultOk = resultCode == RESULT_OK ||
-      (requestCode == INSTALL_CERT_REQUEST && whereIsCertTrusted(currentProxyConfig!!) != null)
+    val resultOk = resultCode == RESULT_OK
 
     if (resultOk) {
-      if (requestCode == START_VPN_REQUEST && currentProxyConfig != null) {
-        Log.i(TAG, "Installing cert")
-        ensureCertificateTrusted(currentProxyConfig!!)
-      } else if (requestCode == INSTALL_CERT_REQUEST) {
-        app.trackEvent("Setup", "installed-cert-successfully")
-        startVpn()
-      } else if (requestCode == SCAN_REQUEST && data != null) {
-        val url = data.getStringExtra(SCANNED_URL_EXTRA)!!
-        launch { connectToVpnFromUrl(url) }
-      } else if (requestCode == PICK_APPS_REQUEST) {
+      if (requestCode == PICK_APPS_REQUEST) {
         app.trackEvent("Setup", "picked-apps")
         val unselectedApps = data!!.getStringArrayExtra(UNSELECTED_APPS_EXTRA)!!.toSet()
         if (unselectedApps != app.uninterceptedApps) {
           app.uninterceptedApps = unselectedApps
           if (isVpnActive()) startVpn()
         }
-      } else if (requestCode == PICK_PORTS_REQUEST) {
-        app.trackEvent("Setup", "picked-ports")
-        val selectedPorts = data!!.getIntArrayExtra(SELECTED_PORTS_EXTRA)!!.toSet()
-        if (selectedPorts != app.interceptedPorts) {
-          app.interceptedPorts = selectedPorts
-          if (isVpnActive()) startVpn()
-        }
+      } else {
+        // launch { connectToVpn() }
+        app.trackEvent("Setup", "installed-cert-successfully")
+        startVpn()
       }
     } else if (
       requestCode == START_VPN_REQUEST &&
@@ -560,16 +450,6 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
       // Then go back to the disconnected state:
       mainState = MainState.DISCONNECTED
       updateUi()
-    } else if (
-      requestCode == INSTALL_CERT_REQUEST &&
-      Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q // Required for promptToManuallyInstallCert
-    ) {
-      // Certificate install failed. Could be manual (failed to follow instructions) or automated
-      // via prompt. We redo the manual step regardless: either (on modern Android) manual is
-      // required so this is just reshowing the instructions, or it was automated but that's not
-      // working for some reason, in which case manual setup is a best-effort fallback.
-      app.trackEvent("Setup", "cert-install-failed")
-      launch { promptToManuallyInstallCert(currentProxyConfig!!.certificate, repeatPrompt = true) }
     } else {
       Sentry.captureMessage("Non-OK result $resultCode for requestCode $requestCode")
       mainState = MainState.FAILED
@@ -579,7 +459,6 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
   private fun startVpn() {
     Log.i(TAG, "Starting VPN")
-
     launch {
       withContext(Dispatchers.Main) {
         mainState = MainState.CONNECTING
@@ -589,18 +468,19 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
     startService(Intent(this, ProxyVpnService::class.java).apply {
       action = START_VPN_ACTION
-      putExtra(PROXY_CONFIG_EXTRA, currentProxyConfig)
       putExtra(UNINTERCEPTED_APPS_EXTRA, app.uninterceptedApps.toTypedArray())
-      putExtra(INTERCEPTED_PORTS_EXTRA, app.interceptedPorts.toIntArray())
     })
+
+    launch {
+      withContext(Dispatchers.Main) {
+        mainState = MainState.CONNECTED
+        updateUi()
+      }
+    }
   }
 
-  private suspend fun connectToVpnFromUrl(url: String) {
-    connectToVpnFromUrl(Uri.parse(url))
-  }
-
-  private suspend fun connectToVpnFromUrl(uri: Uri) {
-    Log.i(TAG, "Connecting to VPN from URL: $uri")
+  private suspend fun connectToVpnFrom() {
+    Log.i(TAG, "Connecting to VPN")
     if (
       mainState != MainState.DISCONNECTED &&
       mainState != MainState.FAILED
@@ -613,8 +493,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
     withContext(Dispatchers.IO) {
       try {
-        val config = getProxyConfig(parseConnectUri(uri))
-        connectToVpn(config)
+        connectToVpn()
       } catch (e: Exception) {
         Log.e(TAG, e.toString())
         e.printStackTrace()
@@ -635,112 +514,6 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
   private fun isVpnConfigured(): Boolean {
     return VpnService.prepare(this) == null
-  }
-
-  private fun ensureCertificateTrusted(proxyConfig: ProxyConfig) {
-    val existingTrust = whereIsCertTrusted(proxyConfig)
-    if (existingTrust == null) {
-      app.trackEvent("Setup", "installing-cert")
-      Log.i(TAG, "Certificate not trusted, prompting to install")
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        app.trackEvent("Setup", "installing-cert-manually")
-        // Android 11+, with no trusted cert: we need to download the cert to Downloads and
-        // then tell the user how to install it manually:
-        launch { promptToManuallyInstallCert(proxyConfig.certificate) }
-      } else {
-        // Up until Android 11, we can prompt the user to install the CA cert into the user
-        // CA store. Notably, if the cert is already installed as a system cert but
-        // disabled, this will get triggered, and will enable the cert, rather than adding
-        // a normal user cert.
-        app.trackEvent("Setup", "installing-cert-automatically")
-        val certInstallIntent = KeyChain.createInstallIntent()
-        certInstallIntent.putExtra(EXTRA_NAME, "HTTP Toolkit CA")
-        certInstallIntent.putExtra(EXTRA_CERTIFICATE, proxyConfig.certificate.encoded)
-        startActivityForResult(certInstallIntent, INSTALL_CERT_REQUEST)
-      }
-    } else {
-      app.trackEvent("Setup", "existing-$existingTrust-cert")
-      Log.i(TAG, "Certificate already trusted, continuing")
-      onActivityResult(INSTALL_CERT_REQUEST, RESULT_OK, null)
-    }
-  }
-
-  @RequiresApi(Build.VERSION_CODES.Q)
-  private suspend fun promptToManuallyInstallCert(
-    cert: Certificate,
-    repeatPrompt: Boolean = false
-  ) {
-    if (!repeatPrompt) {
-      // Get ready to save the cert to downloads:
-      val downloadsUri =
-        MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-
-      val contentDetails = ContentValues().apply {
-        put(MediaStore.Downloads.DISPLAY_NAME, "HTTP Toolkit Certificate.crt")
-        put(MediaStore.Downloads.MIME_TYPE, "application/x-x509-ca-cert")
-        put(MediaStore.Downloads.IS_PENDING, 1)
-      }
-
-      val certUri = contentResolver.insert(downloadsUri, contentDetails)
-        ?: throw RuntimeException("Could not get download cert URI")
-
-      // Write cert contents to a file:
-      withContext(Dispatchers.IO) {
-        contentResolver.openFileDescriptor(certUri, "w", null).use { f ->
-          ParcelFileDescriptor.AutoCloseOutputStream(f).write(cert.encoded)
-        }
-      }
-
-      // All done, mark it as such:
-      contentDetails.clear()
-      contentDetails.put(MediaStore.Downloads.IS_PENDING, 0)
-      contentResolver.update(certUri, contentDetails, null, null)
-    }
-
-    withContext(Dispatchers.Main) {
-      MaterialAlertDialogBuilder(this@MainActivity)
-        .setTitle("Manual setup required")
-        .setIcon(R.drawable.ic_exclamation_triangle)
-        .setMessage(
-          Html.fromHtml(
-            """
-                        <p>
-                            Android ${Build.VERSION.RELEASE} doesn't allow automatic certificate setup.
-                        </p>
-                        <p>
-                            To allow HTTP Toolkit to intercept HTTPS traffic:
-                        </p>
-                        <ul>
-                            ${
-              if (Build.VERSION.SDK_INT > Build.VERSION_CODES.R) // Android 12+
-                """
-                                <li>&nbsp; Open "<b>${
-                  // Slightly different UI for Android 12 and 13:
-                  if (Build.VERSION.SDK_INT < 33) "Advanced Settings" else "More security settings"
-                }</b>" in your security settings</li>
-                                <li>&nbsp; Open "<b>Encryption & Credentials</b>"</li>
-                                """
-              else
-                """
-                                <li>&nbsp; Open "<b>Encryption & Credentials</b>" in your security settings</li>
-                                """
-            }
-                            <li>&nbsp; Select "<b>Install a certificate</b>", then "<b>CA Certificate</b>"</li>
-                            <li>&nbsp; <b>Select the HTTP Toolkit certificate in your Downloads folder</b></li>
-                        </ul>
-                    """, 0
-          )
-        )
-        .setPositiveButton("Open security settings") { _, _ ->
-          startActivityForResult(Intent(Settings.ACTION_SECURITY_SETTINGS), INSTALL_CERT_REQUEST)
-        }
-        .setNegativeButton("Cancel") { _, _ ->
-          disconnect()
-        }
-        .setCancelable(false)
-        .show()
-    }
   }
 
   private suspend fun promptToUpdate() {

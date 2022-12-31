@@ -47,7 +47,7 @@
         be available, except those using explicit certificate pinning.
     </string>
 
-  <string name="scan_button">Scan QR code</string>
+  <string name="scan_button">Connect</string>
   <string name="reconnect_button">Reconnect</string>
   <string name="manual_button">Connect manually</string>
   <string name="disconnect_button">Disconnect</string>

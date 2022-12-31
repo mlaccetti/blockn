@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.view.ContentInfoCompat.Flags
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import io.sentry.Sentry
 import rckt.blockn.HttpToolkitApplication
@@ -31,9 +32,7 @@ const val STOP_VPN_ACTION = "tech.httptoolkit.android.STOP_VPN_ACTION"
 const val VPN_STARTED_BROADCAST = "tech.httptoolkit.android.VPN_STARTED_BROADCAST"
 const val VPN_STOPPED_BROADCAST = "tech.httptoolkit.android.VPN_STOPPED_BROADCAST"
 
-const val PROXY_CONFIG_EXTRA = "tech.httptoolkit.android.PROXY_CONFIG"
 const val UNINTERCEPTED_APPS_EXTRA = "tech.httptoolkit.android.UNINTERCEPTED_APPS"
-const val INTERCEPTED_PORTS_EXTRA = "tech.httptoolkit.android.INTERCEPTED_PORTS"
 
 private var currentService: ProxyVpnService? = null
 fun isVpnActive(): Boolean {
@@ -43,19 +42,12 @@ fun isVpnActive(): Boolean {
     currentService?.isActive() ?: false
 }
 
-fun activeVpnConfig(): ProxyConfig? {
-  return currentService?.proxyConfig
-}
-
 class ProxyVpnService : VpnService(),
   IProtectSocket {
 
   private lateinit var app: HttpToolkitApplication
 
   private var localBroadcastManager: LocalBroadcastManager? = null
-
-  var proxyConfig: ProxyConfig? = null
-    private set
 
   private var vpnInterface: ParcelFileDescriptor? = null
   private var vpnRunnable: ProxyVpnRunnable? = null
@@ -81,14 +73,12 @@ class ProxyVpnService : VpnService(),
     app = this.application as HttpToolkitApplication
 
     if (intent.action == START_VPN_ACTION) {
-      val proxyConfig = intent.getParcelableExtra<ProxyConfig>(PROXY_CONFIG_EXTRA)!!
       val uninterceptedApps = intent.getStringArrayExtra(UNINTERCEPTED_APPS_EXTRA)!!.toSet()
-      val interceptedPorts = intent.getIntArrayExtra(INTERCEPTED_PORTS_EXTRA)!!.toSet()
 
       val vpnStarted = if (isActive())
-        restartVpn(proxyConfig, uninterceptedApps, interceptedPorts)
+        restartVpn(uninterceptedApps)
       else
-        startVpn(proxyConfig, uninterceptedApps, interceptedPorts)
+        startVpn(uninterceptedApps)
 
       if (vpnStarted) {
         // If the system briefly kills us for some reason (memory, the user, whatever) whilst
@@ -117,24 +107,22 @@ class ProxyVpnService : VpnService(),
   private fun showServiceNotification() {
     val pendingActivityIntent: PendingIntent =
       Intent(this, MainActivity::class.java).let { notificationIntent ->
-        PendingIntent.getActivity(this, 0, notificationIntent, 0)
+        PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE)
       }
 
     val pendingServiceIntent: PendingIntent =
       Intent(this, ProxyVpnService::class.java).let { notificationIntent ->
         notificationIntent.action = STOP_VPN_ACTION
-        PendingIntent.getService(this, 1, notificationIntent, 0)
+        PendingIntent.getService(this, 1, notificationIntent, PendingIntent.FLAG_IMMUTABLE)
       }
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-      val notificationChannel = NotificationChannel(
-        NOTIFICATION_CHANNEL_ID,
-        "VPN Status",
-        NotificationManager.IMPORTANCE_DEFAULT
-      )
-      notificationManager.createNotificationChannel(notificationChannel)
-    }
+    val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+    val notificationChannel = NotificationChannel(
+      NOTIFICATION_CHANNEL_ID,
+      "VPN Status",
+      NotificationManager.IMPORTANCE_DEFAULT
+    )
+    notificationManager.createNotificationChannel(notificationChannel)
 
     val notification: Notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
       .setContentIntent(pendingActivityIntent)
@@ -150,11 +138,8 @@ class ProxyVpnService : VpnService(),
   }
 
   private fun startVpn(
-    proxyConfig: ProxyConfig,
-    uninterceptedApps: Set<String>,
-    interceptedPorts: Set<Int>
+    uninterceptedApps: Set<String>
   ): Boolean {
-    this.proxyConfig = proxyConfig
     val packages = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
 
     val allPackageNames = packages.map { pkg -> pkg.packageName }
@@ -172,16 +157,6 @@ class ProxyVpnService : VpnService(),
     val vpnInterface = Builder()
       .addAddress(VPN_IP_ADDRESS, 32)
       .addRoute(ALL_ROUTES, 0)
-      .apply {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-          // Where possible, we want to explicitly set the proxy in addition to
-          // manually redirecting traffic. This is useful because it captures HTTP sent
-          // to non-default ports. We still need to do both though, as not all clients
-          // will use the proxy settings.
-          setHttpProxy(ProxyInfo.buildDirectProxy(proxyConfig.ip, proxyConfig.port))
-        }
-      }
-
       .setMtu(MAX_PACKET_LEN) // Limit the packet size to the buffer used by ProxyVpnRunnable
       .setBlocking(true) // We use a blocking loop to read in ProxyVpnRunnable
 
@@ -236,24 +211,13 @@ class ProxyVpnService : VpnService(),
       this.vpnInterface = vpnInterface
     }
 
-    app.lastProxy = proxyConfig
     showServiceNotification()
-    localBroadcastManager!!.sendBroadcast(
-      Intent(VPN_STARTED_BROADCAST).apply {
-        putExtra(PROXY_CONFIG_EXTRA, proxyConfig)
-      }
-    )
-
     SocketProtector.getInstance().setProtector(this)
-
 
     // TODO: Should we support *?
 
     vpnRunnable = ProxyVpnRunnable(
-      vpnInterface,
-      proxyConfig.ip,
-      proxyConfig.port,
-      interceptedPorts.toIntArray()
+      vpnInterface
     )
     Thread(vpnRunnable, "Vpn thread").start()
 
@@ -262,9 +226,7 @@ class ProxyVpnService : VpnService(),
   }
 
   private fun restartVpn(
-    proxyConfig: ProxyConfig,
     uninterceptedApps: Set<String>,
-    interceptedPorts: Set<Int>
   ): Boolean {
     Log.i(TAG, "VPN stopping for restart...")
 
@@ -282,7 +244,7 @@ class ProxyVpnService : VpnService(),
     }
 
     stopForeground(true)
-    return startVpn(proxyConfig, uninterceptedApps, interceptedPorts)
+    return startVpn(uninterceptedApps)
   }
 
   private fun stopVpn() {
@@ -308,7 +270,6 @@ class ProxyVpnService : VpnService(),
     stopSelf()
 
     currentService = null
-    this.proxyConfig = null
     app.vpnShouldBeRunning = false
   }
 

@@ -84,6 +84,8 @@ public class SessionHandler {
 
     final IPv4Header ipHeader = IPPacketFactory.createIPv4Header(stream);
 
+    // TODO perform a DNS lookup on the IP, see if it is in the blocklist, drop if it is
+
     if (ipHeader.getProtocol() == 6) {
       handleTCPPacket(stream, ipHeader);
     } else if (ipHeader.getProtocol() == 17) {
