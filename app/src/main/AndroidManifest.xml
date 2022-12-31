@@ -1,97 +1,109 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest
-        xmlns:android="http://schemas.android.com/apk/res/android"
-        xmlns:tools="http://schemas.android.com/tools"
-        package="tech.httptoolkit.android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.CAMERA" />
+  <uses-permission
+    android:name="android.permission.QUERY_ALL_PACKAGES"
+    tools:ignore="QueryAllPackagesPermission" />
 
-    <uses-permission
-            android:name="android.permission.READ_PHONE_STATE"
-            tools:node="remove" />
-    <uses-permission
-            android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-            tools:node="remove" />
+  <uses-permission
+    android:name="android.permission.READ_PHONE_STATE"
+    tools:node="merge" />
 
-    <application
-            android:name=".HttpToolkitApplication"
-            android:allowBackup="true"
-            android:icon="@mipmap/ic_launcher"
-            android:label="@string/app_name"
-            android:roundIcon="@mipmap/ic_launcher_round"
-            android:supportsRtl="true"
-            android:theme="@style/AppTheme"
-            tools:targetApi="m" android:usesCleartextTraffic="true"
-            android:largeHeap="true">
-        <service
-            android:name=".ProxyVpnService"
-            android:permission="android.permission.BIND_VPN_SERVICE">
-            <intent-filter>
-                <action android:name="android.net.VpnService"/>
-                <action android:name="tech.httptoolkit.android.ProxyVpnService"/>
-            </intent-filter>
-        </service>
+  <application
+    android:name=".HttpToolkitApplication"
+    android:allowBackup="true"
+    android:icon="@mipmap/ic_launcher"
+    android:label="@string/app_name"
+    android:largeHeap="true"
+    android:roundIcon="@mipmap/ic_launcher_round"
+    android:supportsRtl="true"
+    android:theme="@style/AppTheme"
+    android:usesCleartextTraffic="true">
 
-        <activity
-                android:name=".MainActivity"
-                android:label="@string/app_name"
-                android:launchMode="singleTask">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
+    <meta-data android:name="io.sentry.dsn" android:value="https://a54226a6ff564e998f3e24500fe5b884@o4504421150752768.ingest.sentry.io/4504421152063488" />
+    <!-- Set tracesSampleRate to 1.0 to capture 100% of transactions for performance monitoring.
+       We recommend adjusting this value in production. -->
+    <meta-data android:name="io.sentry.traces.sample-rate" android:value="1.0" />
+    <!-- Enable user interaction tracing to capture transactions for various UI events (such as clicks or scrolls). -->
+    <meta-data android:name="io.sentry.traces.user-interaction.enable" android:value="true" />
 
-            <intent-filter
-                    tools:targetApi="m" android:autoVerify="true"
-                    >
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <category android:name="android.intent.category.DEFAULT" />
+    <service
+      android:name=".ProxyVpnService"
+      android:exported="false"
+      android:permission="android.permission.BIND_VPN_SERVICE">
+      <intent-filter>
+        <action android:name="android.net.VpnService" />
+        <action android:name="rckt.blockn.android.ProxyVpnService" />
+      </intent-filter>
+    </service>
 
-                <data android:scheme="https"
-                        android:host="android.httptoolkit.tech"
-                        android:pathPrefix="/connect" />
-            </intent-filter>
-        </activity>
+    <activity
+      android:name=".MainActivity"
+      android:launchMode="singleTask"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
 
-        <!--
-            Alias that allows remote intents of ACTIVATE/DEACTIVATE from other apps, but only
-            if they have INJECT_EVENTS (restricted system only permission, equivalent to complete
-            control of the app anyway). In practice this is used to limit remote control to the
-            shell user via ADB. It's important to lock this down or other apps could activate
-            the VPN and pass a cert to send all traffic from the phone anywhere without prompts.
-        -->
-        <activity-alias
-                android:name=".RemoteControlMainActivity"
-                android:targetActivity=".MainActivity"
-                android:permission="android.permission.INJECT_EVENTS">
-            <intent-filter>
-                <action android:name="tech.httptoolkit.android.ACTIVATE" />
-                <category android:name="android.intent.category.DEFAULT" />
+      <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW" />
 
-                <data android:scheme="https"
-                        android:host="android.httptoolkit.tech"
-                        android:pathPrefix="/connect" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="tech.httptoolkit.android.DEACTIVATE" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity-alias>
+        <category android:name="android.intent.category.BROWSABLE" />
+        <category android:name="android.intent.category.DEFAULT" />
 
-        <activity android:name=".ScanActivity" android:parentActivityName=".MainActivity">
-            <meta-data
-                android:name="android.support.PARENT_ACTIVITY"
-                android:value=".MainActivity" />
-        </activity>
+        <data
+          android:host="android.rckt.blockn"
+          android:pathPrefix="/connect"
+          android:scheme="https" />
+      </intent-filter>
+    </activity>
 
-        <activity android:name=".ApplicationListActivity" />
-        <activity android:name=".PortListActivity" />
+    <!--
+        Alias that allows remote intents of ACTIVATE/DEACTIVATE from other apps, but only
+        if they have INJECT_EVENTS (restricted system only permission, equivalent to complete
+        control of the app anyway). In practice this is used to limit remote control to the
+        shell user via ADB. It's important to lock this down or other apps could activate
+        the VPN and pass a cert to send all traffic from the phone anywhere without prompts.
+    -->
+    <activity-alias
+      android:name=".RemoteControlMainActivity"
+      android:exported="false"
+      android:permission="android.permission.INJECT_EVENTS"
+      android:targetActivity=".MainActivity">
+      <intent-filter>
+        <action android:name="tech.httptoolkit.android.ACTIVATE" />
+        <category android:name="android.intent.category.DEFAULT" />
 
-        <meta-data android:name="search-engine" android:resource="@xml/noindex" />
-    </application>
+        <data
+          android:host="android.httptoolkit.tech"
+          android:pathPrefix="/connect"
+          android:scheme="https" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="tech.httptoolkit.android.DEACTIVATE" />
+        <category android:name="android.intent.category.DEFAULT" />
+      </intent-filter>
+    </activity-alias>
+
+    <activity
+      android:name=".ScanActivity"
+      android:parentActivityName=".MainActivity">
+      <meta-data
+        android:name="android.support.PARENT_ACTIVITY"
+        android:value=".MainActivity" />
+    </activity>
+
+    <activity android:name=".ApplicationListActivity" />
+    <activity android:name=".PortListActivity" />
+
+    <meta-data
+      android:name="search-engine"
+      android:resource="@xml/noindex" />
+  </application>
 </manifest>
