@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
   <string name="app_name">blockn</string>
 
   <string name="vpn_active_notification_title">Interception active</string>
@@ -10,7 +10,7 @@
   <string name="connecting_status">Connecting…</string>
   <string name="connected_status">Connected</string>
   <string name="failed_status">Oh no!</string>
-  <string name="failed_details">Blockn couldn\'t initiatlize.</string>
+  <string name="failed_details" tools:ignore="ExtraTranslation">Blockn couldn\'t initiatlize.</string>
 
   <string name="scan_button">Connect</string>
   <string name="reconnect_button">Reconnect</string>

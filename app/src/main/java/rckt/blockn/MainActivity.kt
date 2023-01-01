@@ -242,7 +242,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
       MainState.FAILED -> {
         statusText.setText(R.string.failed_status)
 
-        detailContainer.addView(detailText(R.string.failed_details))
+        detailContainer.addView(detailText(R.string.failed_status))
 
         buttonContainer.visibility = View.VISIBLE
         buttonContainer.addView(primaryButton(R.string.try_again_button, ::resetAfterFailure))

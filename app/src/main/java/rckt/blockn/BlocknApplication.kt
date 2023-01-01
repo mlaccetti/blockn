@@ -161,7 +161,7 @@ class BlocknApplication : Application() {
   }
 
   fun trackEvent(category: String, action: String) {
-    analytics.logEvent(category) {
+    analytics.logEvent(FirebaseAnalytics.Event.LOGIN) {
       param(FirebaseAnalytics.Param.ITEM_ID, category)
       param(FirebaseAnalytics.Param.ITEM_NAME, action)
     }
