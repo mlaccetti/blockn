@@ -19,7 +19,7 @@
     android:layout_height="match_parent"
     android:layout_marginBottom="120dp"
     android:alpha="0.3"
-    android:tint="#fff"
+    app:tint="#fff"
     app:srcCompat="@drawable/ic_transparent_icon"
     tools:ignore="ContentDescription" />
 

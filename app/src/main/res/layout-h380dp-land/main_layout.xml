@@ -23,7 +23,7 @@
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
       android:layout_marginBottom="18dp"
-      android:contentDescription="The HTTP Toolkit Logo"
+      android:contentDescription="The Blockn Logo"
       app:layout_constraintBottom_toTopOf="@+id/statusText"
       app:layout_constraintEnd_toEndOf="parent"
       app:layout_constraintStart_toStartOf="parent"

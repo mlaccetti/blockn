@@ -8,9 +8,10 @@ import android.util.Log
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerClient.InstallReferrerResponse
 import com.android.installreferrer.api.InstallReferrerStateListener
-import com.google.android.gms.analytics.GoogleAnalytics
-import com.google.android.gms.analytics.HitBuilders
-import com.google.android.gms.analytics.Tracker
+import com.google.firebase.analytics.FirebaseAnalytics
+import com.google.firebase.analytics.ktx.analytics
+import com.google.firebase.analytics.ktx.logEvent
+import com.google.firebase.ktx.Firebase
 import io.sentry.Sentry
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
@@ -34,9 +35,8 @@ private val isProbablyEmulator =
 
 private val bootTime = (System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime())
 
-class HttpToolkitApplication : Application() {
-  private var analytics: GoogleAnalytics? = null
-  private var ga: Tracker? = null
+class BlocknApplication : Application() {
+  private lateinit var analytics: FirebaseAnalytics
 
   private lateinit var prefs: SharedPreferences
   private var vpnWasKilled: Boolean = false
@@ -55,18 +55,13 @@ class HttpToolkitApplication : Application() {
 
   override fun onCreate() {
     super.onCreate()
-    prefs = getSharedPreferences("tech.httptoolkit.android", MODE_PRIVATE)
+    prefs = getSharedPreferences("rckt.blockn", MODE_PRIVATE)
 
     Thread.setDefaultUncaughtExceptionHandler { _, _ ->
       prefs.edit().putBoolean(APP_CRASHED_PREF, true).apply()
     }
 
-    if (BuildConfig.GA_ID != null) {
-      analytics = GoogleAnalytics.getInstance(this)
-      ga = analytics!!.newTracker(BuildConfig.GA_ID)
-      ga!!.setAnonymizeIp(true)
-      resumeEvents() // Resume events on app startup, in case they were paused and we crashed
-    }
+    analytics = Firebase.analytics
 
     // Check if we've been recreated unexpectedly, with no crashes in the meantime:
     val appCrashed = prefs.getBoolean(APP_CRASHED_PREF, false)
@@ -144,7 +139,7 @@ class HttpToolkitApplication : Application() {
 
   var uninterceptedApps: Set<String>
     get() {
-      val prefs = getSharedPreferences("tech.httptoolkit.android", MODE_PRIVATE)
+      val prefs = getSharedPreferences("rckt.blockn", MODE_PRIVATE)
       val packagesSet = prefs.getStringSet("unintercepted-packages", null)
       val allPackages = packageManager.getInstalledPackages(PackageManager.GET_META_DATA)
         .map { pkg -> pkg.packageName }
@@ -153,50 +148,22 @@ class HttpToolkitApplication : Application() {
         .toSet()
     }
     set(packageNames) {
-      val prefs = getSharedPreferences("tech.httptoolkit.android", MODE_PRIVATE)
+      val prefs = getSharedPreferences("rckt.blockn", MODE_PRIVATE)
       prefs.edit().putStringSet("unintercepted-packages", packageNames).apply()
     }
 
-  var interceptedPorts: Set<Int>
-    get() {
-      val prefs = getSharedPreferences("tech.httptoolkit.android", MODE_PRIVATE)
-      val portsSet = prefs.getStringSet("intercepted-ports", null)
-      return portsSet?.map(String::toInt)?.toSortedSet()
-        ?: DEFAULT_PORTS
-    }
-    set(ports) {
-      val prefs = getSharedPreferences("tech.httptoolkit.android", MODE_PRIVATE)
-      prefs.edit().putStringSet("intercepted-ports", ports.map(Int::toString).toSet()).apply()
-    }
-
   fun trackScreen(name: String) {
-    ga?.setScreenName(name)
-    ga?.send(HitBuilders.EventBuilder().build())
-  }
-
-  fun clearScreen() {
-    ga?.setScreenName(null)
+    analytics.logEvent(FirebaseAnalytics.Event.SCREEN_VIEW) {
+      param(FirebaseAnalytics.Param.ITEM_ID, name)
+      param(FirebaseAnalytics.Param.ITEM_NAME, name)
+      param(FirebaseAnalytics.Param.CONTENT_TYPE, "image")
+    }
   }
 
   fun trackEvent(category: String, action: String) {
-    ga?.send(
-      HitBuilders.EventBuilder()
-        .setCategory(category)
-        .setAction(action)
-        .build()
-    )
-  }
-
-  /**
-   * Unclear if the below two actually work - analytics on devices with google play is
-   * managed by the device itself, not the app. Worth a try though.
-   */
-
-  fun pauseEvents() {
-    analytics?.setLocalDispatchPeriod(0) // Don't dispatch events for now
-  }
-
-  fun resumeEvents() {
-    analytics?.setLocalDispatchPeriod(120) // Set dispatching back to Android default
+    analytics.logEvent(category) {
+      param(FirebaseAnalytics.Param.ITEM_ID, category)
+      param(FirebaseAnalytics.Param.ITEM_NAME, action)
+    }
   }
 }

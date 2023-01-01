@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import android.text.method.LinkMovementMethod
 import android.view.LayoutInflater
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -23,15 +22,6 @@ class ConnectionStatusView(
   init {
     val layout = R.layout.connection_status_none
     LayoutInflater.from(context).inflate(layout, this, true)
-
-    if (layout == R.layout.connection_status_user) {
-      // Make inline links clickable:
-      val statusText = findViewById<TextView>(R.id.connectionStatusText)
-      if (statusText != null) statusText.movementMethod = LinkMovementMethod.getInstance()
-    }
-
-    val connectedToText = findViewById<TextView>(R.id.connectedTo)
-    connectedToText.text = context.getString(R.string.connected_tunnel_details)
 
     val appInterceptionStatus = findViewById<MaterialCardView>(R.id.interceptedAppsButton)
     appInterceptionStatus.setOnClickListener { _ ->

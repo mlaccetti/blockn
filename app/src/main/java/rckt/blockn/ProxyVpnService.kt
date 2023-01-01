@@ -4,20 +4,15 @@ import android.app.*
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
-import android.net.ProxyInfo
 import android.net.VpnService
-import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.view.ContentInfoCompat.Flags
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import io.sentry.Sentry
-import rckt.blockn.HttpToolkitApplication
-import rckt.blockn.MainActivity
 import rckt.blockn.vpn.socket.IProtectSocket
 import rckt.blockn.vpn.socket.SocketProtector
-import java.io.*
+import java.io.IOException
 
 private const val ALL_ROUTES = "0.0.0.0"
 private const val VPN_IP_ADDRESS =
@@ -26,13 +21,13 @@ private const val VPN_IP_ADDRESS =
 private const val NOTIFICATION_ID = 45456
 private const val NOTIFICATION_CHANNEL_ID = "vpn-notifications"
 
-const val START_VPN_ACTION = "tech.httptoolkit.android.START_VPN_ACTION"
-const val STOP_VPN_ACTION = "tech.httptoolkit.android.STOP_VPN_ACTION"
+const val START_VPN_ACTION = "rckt.blockn.START_VPN_ACTION"
+const val STOP_VPN_ACTION = "rckt.blockn.STOP_VPN_ACTION"
 
-const val VPN_STARTED_BROADCAST = "tech.httptoolkit.android.VPN_STARTED_BROADCAST"
-const val VPN_STOPPED_BROADCAST = "tech.httptoolkit.android.VPN_STOPPED_BROADCAST"
+const val VPN_STARTED_BROADCAST = "rckt.blockn.VPN_STARTED_BROADCAST"
+const val VPN_STOPPED_BROADCAST = "rckt.blockn.VPN_STOPPED_BROADCAST"
 
-const val UNINTERCEPTED_APPS_EXTRA = "tech.httptoolkit.android.UNINTERCEPTED_APPS"
+const val UNINTERCEPTED_APPS_EXTRA = "rckt.blockn.UNINTERCEPTED_APPS"
 
 private var currentService: ProxyVpnService? = null
 fun isVpnActive(): Boolean {
@@ -45,7 +40,7 @@ fun isVpnActive(): Boolean {
 class ProxyVpnService : VpnService(),
   IProtectSocket {
 
-  private lateinit var app: HttpToolkitApplication
+  private lateinit var app: BlocknApplication
 
   private var localBroadcastManager: LocalBroadcastManager? = null
 
@@ -70,7 +65,7 @@ class ProxyVpnService : VpnService(),
     if (localBroadcastManager == null) {
       localBroadcastManager = LocalBroadcastManager.getInstance(this)
     }
-    app = this.application as HttpToolkitApplication
+    app = this.application as BlocknApplication
 
     if (intent.action == START_VPN_ACTION) {
       val uninterceptedApps = intent.getStringArrayExtra(UNINTERCEPTED_APPS_EXTRA)!!.toSet()
@@ -152,7 +147,6 @@ class ProxyVpnService : VpnService(),
 
     if (this.vpnInterface != null) return false // Already running, do nothing
 
-    app.pauseEvents() // Try not to send events while the VPN is active, it's unnecessary noise
     app.trackEvent("VPN", "vpn-started")
     val vpnInterface = Builder()
       .addAddress(VPN_IP_ADDRESS, 32)
@@ -163,7 +157,7 @@ class ProxyVpnService : VpnService(),
       .apply {
         // We exclude ourselves from interception, so we can still make network requests
         // separately, primarily because otherwise pinging with isReachable is recursive.
-        val httpToolkitPackage = packageName
+        val blocknPackage = packageName
 
         when {
           isGenymotion -> {
@@ -172,7 +166,7 @@ class ProxyVpnService : VpnService(),
             // every app that we care about.
 
             val pkgsToIntercept = allPackageNames.filter { name ->
-              name != httpToolkitPackage && !uninterceptedApps.contains(name)
+              name != blocknPackage && !uninterceptedApps.contains(name)
             }
 
             if (!pkgsToIntercept.isEmpty()) {
@@ -196,8 +190,8 @@ class ProxyVpnService : VpnService(),
                 addDisallowedApplication(name)
               }
 
-            // Never intercept HTTP Toolkit (as above - doing so causes problems)
-            addDisallowedApplication(httpToolkitPackage)
+            // Never intercept Blockn (as above - doing so causes problems)
+            addDisallowedApplication(blocknPackage)
           }
         }
       }
@@ -252,7 +246,6 @@ class ProxyVpnService : VpnService(),
 
     if (vpnRunnable != null) {
       app.trackEvent("VPN", "vpn-stopped")
-      app.resumeEvents()
 
       vpnRunnable!!.stop()
       vpnRunnable = null

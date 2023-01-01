@@ -17,7 +17,6 @@
 package rckt.blockn.vpn;
 
 import android.util.Log;
-import android.util.SparseArray;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -182,10 +181,10 @@ public class SessionManager implements ICloseSession {
     channel.configureBlocking(false);
 
     String ips = PacketUtil.intToIPAddress(ip);
-    Log.d(TAG, "created new SocketChannel for " + key);
+    // Log.d(TAG, "created new SocketChannel for " + key);
 
     protector.protect(channel.socket());
-    Log.d(TAG, "Protected new SocketChannel");
+    // Log.d(TAG, "Protected new SocketChannel");
 
     session.setChannel(channel);
 

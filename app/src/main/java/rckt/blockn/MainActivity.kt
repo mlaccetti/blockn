@@ -3,9 +3,7 @@ package rckt.blockn
 import android.app.Activity
 import android.content.*
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.net.VpnService
-import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
@@ -19,7 +17,6 @@ import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.view.ContextThemeWrapper
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import com.google.android.gms.common.GooglePlayServicesUtil
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.sentry.Sentry
 import kotlinx.coroutines.*
@@ -37,11 +34,11 @@ enum class MainState {
   FAILED
 }
 
-private const val ACTIVATE_INTENT = "tech.httptoolkit.android.ACTIVATE"
-private const val DEACTIVATE_INTENT = "tech.httptoolkit.android.DEACTIVATE"
+private const val ACTIVATE_INTENT = "rckt.blockn.ACTIVATE"
+private const val DEACTIVATE_INTENT = "rckt.blockn.DEACTIVATE"
 
 class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
-  private lateinit var app: HttpToolkitApplication
+  private lateinit var app: BlocknApplication
 
   private var localBroadcastManager: LocalBroadcastManager? = null
   private val broadcastReceiver = object : BroadcastReceiver() {
@@ -72,7 +69,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
       addAction(VPN_STOPPED_BROADCAST)
     })
 
-    app = this.application as HttpToolkitApplication
+    app = this.application as BlocknApplication
     setContentView(R.layout.main_layout)
     updateUi()
 
@@ -80,6 +77,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
     // Are we being opened by an intent? I.e. a barcode scan/URL elsewhere on the device
     if (intent != null) {
+      Log.i(TAG, "Main activity started via intent")
       onNewIntent(intent)
     } else {
       // If not, check if this is a post-install run, and if so configure automatically
@@ -88,9 +86,10 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
         val firstRunParams = app.popFirstRunParams()
         if (
           firstRunParams != null &&
-          firstRunParams.startsWith("https://android.httptoolkit.tech/connect/")
+          firstRunParams.startsWith("https://rckt.tech/blockn/")
         ) {
-          launch { connectToVpn() }
+          Log.i(TAG, "Main activity started via post-install run")
+          launch { validateConnectToVpn() }
         }
       }
     }
@@ -114,7 +113,6 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
   override fun onPause() {
     super.onPause()
     Log.d(TAG, "onPause")
-    app.clearScreen()
     this.lastPauseTime = System.currentTimeMillis()
   }
 
@@ -132,7 +130,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     // protects against explicit intents targeting MainActivity. RC intents are known to be
     // trustworthy, so are allowed to silently activate/deactivate the VPN connection.
     val isRCIntent =
-      intent.component?.className == "tech.httptoolkit.android.RemoteControlMainActivity"
+      intent.component?.className == "rckt.blockn.RemoteControlMainActivity"
 
     when {
       // ACTION_VIEW means that somebody had the app installed, and scanned the barcode with
@@ -149,13 +147,13 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
             .setTitle("Enable Interception")
             .setIcon(R.drawable.ic_exclamation_triangle)
             .setMessage(
-              "Do you want to share all this device's HTTP traffic with HTTP Toolkit?" +
+              "Do you want to share all this device's HTTP traffic with Blockn?" +
                 "\n\n" +
                 "Only accept this if you trust the source."
             )
             .setPositiveButton("Enable") { _, _ ->
               Log.i(TAG, "Prompt confirmed")
-              launch { connectToVpnFrom() }
+              launch { connectToVpn() }
             }
             .setNegativeButton("Cancel") { _, _ ->
               Log.i(TAG, "Prompt cancelled")
@@ -163,7 +161,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
             .show()
         } else {
           Log.i(TAG, "Launching from ACTION_VIEW intent")
-          launch { connectToVpnFrom() }
+          launch { connectToVpn() }
         }
       }
 
@@ -171,7 +169,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
       // Permission required, checked for via activity-alias in the manifest
       isRCIntent && intent.action == ACTIVATE_INTENT -> {
         app.trackEvent("Setup", "rc-activate")
-        launch { connectToVpnFrom() }
+        launch { connectToVpn() }
       }
       isRCIntent && intent.action == DEACTIVATE_INTENT -> {
         app.trackEvent("Setup", "rc-deactivate")
@@ -209,10 +207,8 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
       MainState.DISCONNECTED -> {
         statusText.setText(R.string.disconnected_status)
 
-        detailContainer.addView(detailText(R.string.disconnected_details))
-
         buttonContainer.visibility = View.VISIBLE
-        buttonContainer.addView(primaryButton(R.string.scan_button, ::connectToVPN))
+        buttonContainer.addView(primaryButton(R.string.scan_button, ::launchConnectToVpn))
       }
       MainState.CONNECTING -> {
         statusText.setText(R.string.connecting_status)
@@ -238,7 +234,6 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
         buttonContainer.visibility = View.VISIBLE
         buttonContainer.addView(primaryButton(R.string.disconnect_button, ::disconnect))
-        buttonContainer.addView(secondaryButton(R.string.test_button, ::testInterception))
       }
       MainState.DISCONNECTING -> {
         statusText.setText(R.string.disconnecting_status)
@@ -253,21 +248,10 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
         buttonContainer.addView(primaryButton(R.string.try_again_button, ::resetAfterFailure))
       }
     }
-
-    if (buttonContainer.visibility == View.VISIBLE) {
-      buttonContainer.addView(secondaryButton(R.string.docs_button, ::openDocs))
-    }
   }
 
   private fun primaryButton(@StringRes contentId: Int, clickHandler: () -> Unit): Button {
     val button = layoutInflater.inflate(R.layout.primary_button, null) as Button
-    button.setText(contentId)
-    button.setOnClickListener { clickHandler() }
-    return button
-  }
-
-  private fun secondaryButton(@StringRes contentId: Int, clickHandler: () -> Unit): Button {
-    val button = layoutInflater.inflate(R.layout.secondary_button, null) as Button
     button.setText(contentId)
     button.setOnClickListener { clickHandler() }
     return button
@@ -279,13 +263,12 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     return text
   }
 
-  private fun connectToVPN() {
+  private fun launchConnectToVpn() {
     app.trackEvent("Button", "scan-code")
-    launch { connectToVpnFrom() }
-    // startActivityForResult(Intent(this, ScanActivity::class.java), SCAN_REQUEST)
+    launch { connectToVpn() }
   }
 
-  private suspend fun connectToVpn() {
+  private suspend fun validateConnectToVpn() {
     Log.i(TAG, "Connect to VPN")
 
     this.mainState = MainState.CONNECTING
@@ -319,42 +302,10 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     })
   }
 
-  private suspend fun reconnect() {
-    app.trackEvent("Button", "reconnect")
-
-    withContext(Dispatchers.Main) {
-      mainState = MainState.CONNECTING
-      updateUi()
-    }
-
-    try {
-      connectToVpn()
-    } catch (e: Exception) {
-      Log.e(TAG, e.toString())
-      e.printStackTrace()
-
-      withContext(Dispatchers.Main) {
-        app.trackEvent("Setup", "reconnect-failed")
-        mainState = MainState.FAILED
-        updateUi()
-      }
-
-      // We report errors only that aren't simple connection failures
-      if (e !is SocketTimeoutException && e !is ConnectException) {
-        Sentry.captureException(e)
-      }
-    }
-  }
-
   private fun resetAfterFailure() {
     app.trackEvent("Button", "try-again")
     mainState = MainState.DISCONNECTED
     updateUi()
-  }
-
-  private fun openDocs() {
-    app.trackEvent("Button", "open-docs")
-    launchBrowser("httptoolkit.tech/docs/guides/android")
   }
 
   private fun chooseApps() {
@@ -366,49 +317,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     )
   }
 
-  private fun testInterception() {
-    app.trackEvent("Button", "test-interception")
-
-    // If we have a system cert, in theory we could use any browser. In practice though, some
-    // (i.e. Firefox) ignore system certs to use their own settings. It's best to try and ensure
-    // for testing, we always use a supported browser. This will prioritize the default, if it
-    // is supported, so only matters if the default browser is not on our known-good list.
-    val testBrowser = getTestBrowserPackage(this)
-
-    val canUseHttps = testBrowser != null
-
-    launchBrowser("amiusing.httptoolkit.tech", canUseHttps, testBrowser)
-  }
-
-  private fun launchBrowser(
-    uri: String,
-    canUseHttps: Boolean = true,
-    browserPackage: String? = null
-  ) {
-    try {
-      startActivity(
-        Intent(
-          Intent.ACTION_VIEW,
-          Uri.parse(
-            (
-              if (canUseHttps) "https" else "http"
-              ) + "://" + uri
-          )
-        ).apply {
-          if (browserPackage != null) setPackage(browserPackage)
-        }
-      )
-    } catch (e: ActivityNotFoundException) {
-      if (browserPackage != null) {
-        // If we tried a specific package, and it failed, try again with the simplest
-        // plain HTTP catch-all VIEW intent, and hope something somewhere can handle it.
-        launchBrowser(uri, false)
-      } else {
-        showNoBrowserAlert(uri)
-      }
-    }
-  }
-
+  @Deprecated("Deprecated in Java")
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
     super.onActivityResult(requestCode, resultCode, data)
 
@@ -427,6 +336,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     if (resultOk) {
       if (requestCode == PICK_APPS_REQUEST) {
         app.trackEvent("Setup", "picked-apps")
+        Log.i(TAG, "resultOk, selecting apps")
         val unselectedApps = data!!.getStringArrayExtra(UNSELECTED_APPS_EXTRA)!!.toSet()
         if (unselectedApps != app.uninterceptedApps) {
           app.uninterceptedApps = unselectedApps
@@ -434,7 +344,8 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
         }
       } else {
         // launch { connectToVpn() }
-        app.trackEvent("Setup", "installed-cert-successfully")
+        Log.i(TAG, "resultOk, cert installed, starting VPN")
+        app.trackEvent("Setup", "start-vpn")
         startVpn()
       }
     } else if (
@@ -479,7 +390,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     }
   }
 
-  private suspend fun connectToVpnFrom() {
+  private suspend fun connectToVpn() {
     Log.i(TAG, "Connecting to VPN")
     if (
       mainState != MainState.DISCONNECTED &&
@@ -493,7 +404,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
     withContext(Dispatchers.IO) {
       try {
-        connectToVpn()
+        validateConnectToVpn()
       } catch (e: Exception) {
         Log.e(TAG, e.toString())
         e.printStackTrace()
@@ -516,46 +427,21 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     return VpnService.prepare(this) == null
   }
 
-  private suspend fun promptToUpdate() {
-    withContext(Dispatchers.Main) {
-      MaterialAlertDialogBuilder(this@MainActivity)
-        .setTitle("Updates available")
-        .setIcon(R.drawable.ic_info_circle)
-        .setMessage("An updated version of HTTP Toolkit is available")
-        .setNegativeButton("Ignore") { _, _ -> }
-        .setPositiveButton("Update now") { _, _ ->
-          // Open the app in the market. That a release is available on github doesn't
-          // *strictly* mean that it's available on the Android market right now, but
-          // it is imminent, and installing from play means it'll update fully later.
-          startActivity(
-            Intent(Intent.ACTION_VIEW).apply {
-              data = Uri.parse("market://details?id=tech.httptoolkit.android.v1")
-            }
-          )
-        }
-        .show()
-    }
-  }
-
   private fun showVpnKilledAlert() {
     MaterialAlertDialogBuilder(this)
-      .setTitle("HTTP Toolkit was killed")
+      .setTitle("Blockn was killed")
       .setIcon(R.drawable.ic_exclamation_triangle)
       .setMessage(
-        "HTTP Toolkit interception was shut down automatically by Android. " +
+        "Blockn interception was shut down automatically by Android. " +
           "This is usually caused by overly strict power management of background processes. " +
           "\n\n" +
-          "To fix this, disable battery optimization for HTTP Toolkit in your settings."
+          "To fix this, disable battery optimization for Blockn in your settings."
       )
       .setNegativeButton("Ignore") { _, _ -> }
       .setPositiveButton("Go to settings") { _, _ ->
         val batterySettingIntents = listOf(
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-          } else null,
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)
-          } else null,
+          Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+          Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS),
           Intent().apply {
             this.component = ComponentName(
               "com.samsung.android.lool",
@@ -573,23 +459,9 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
         // Try the intents in order until one of them works
         for (intent in batterySettingIntents) {
-          if (intent != null && tryStartActivity(intent)) break
+          if (tryStartActivity(intent)) break
         }
       }
-      .show()
-  }
-
-  private fun showNoBrowserAlert(uri: String) {
-    MaterialAlertDialogBuilder(this)
-      .setTitle("No browser available")
-      .setIcon(R.drawable.ic_exclamation_triangle)
-      .setMessage(
-        "HTTP Toolkit could not open a browser on this device. " +
-          "This usually means you don't have any browser installed. To visit " +
-          uri +
-          " please install a browser app."
-      )
-      .setNeutralButton("OK") { _, _ -> }
       .show()
   }
 
@@ -598,19 +470,15 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
       .setTitle("VPN setup failed")
       .setIcon(R.drawable.ic_exclamation_triangle)
       .setMessage(
-        "HTTP Toolkit could not be configured as a VPN on your device." +
+        "Blockn could not be configured as a VPN on your device." +
           "\n\n" +
           "This usually means you have an always-on VPN configured, which blocks " +
-          "installation of other VPNs. To activate HTTP Toolkit you'll need to " +
+          "installation of other VPNs. To activate Blockn you'll need to " +
           "deactivate that VPN first."
       )
       .setNegativeButton("Cancel") { _, _ -> }
       .setPositiveButton("Open VPN Settings") { _, _ ->
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-          startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
-        } else {
-          startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
-        }
+        startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
       }
       .show()
   }
@@ -626,46 +494,3 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     }
   }
 }
-
-private fun isPackageAvailable(context: Context, packageName: String) = try {
-  context.packageManager.getPackageInfo(packageName, 0)
-  true
-} catch (e: PackageManager.NameNotFoundException) {
-  false
-}
-
-private fun getDefaultBrowserPackage(context: Context): String? {
-  val browserIntent = Intent("android.intent.action.VIEW", Uri.parse("http://example.com"))
-  val resolveInfo =
-    context.packageManager.resolveActivity(browserIntent, PackageManager.MATCH_DEFAULT_ONLY)
-  return resolveInfo?.activityInfo?.packageName
-}
-
-private fun getTestBrowserPackage(context: Context): String? {
-  // A list of browsers that trust the user store by default, and so
-  // will work OOTB even if only the user cert is trusted.
-  val supportedBrowsers = listOf(
-    "com.android.chrome", // Modern Android
-    "com.android.browser", // <= Android 2.3
-    "com.google.android.browser", // > 2.3, < 4.0.2
-    "com.brave.browser", // Brave
-    "com.microsoft.emmx", // Edge
-    "com.sec.android.app.sbrowser" // Samsung browser
-    // FF/Opera/UC Browser & others don't trust user CAs by default, so we avoid them for testing
-  )
-
-  // If the default browser is supported, just use that, easy
-  val defaultBrowser = getDefaultBrowserPackage(context)
-  Log.i("tech.httptoolkit", "Default browser is $defaultBrowser")
-  if (supportedBrowsers.contains(defaultBrowser)) {
-    return defaultBrowser
-  }
-
-  // If not, use the first browser in the list above that's installed, or return null
-  return supportedBrowsers.firstOrNull { packageName ->
-    isPackageAvailable(context, packageName)
-  }
-}
-
-private fun isStoreAvailable(context: Context): Boolean =
-  isPackageAvailable(context, GooglePlayServicesUtil.GOOGLE_PLAY_STORE_PACKAGE)

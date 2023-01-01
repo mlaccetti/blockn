@@ -12,13 +12,11 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import kotlinx.coroutines.*
-import rckt.blockn.AppLabelCache
 import rckt.blockn.databinding.AppsListBinding
-import rckt.blockn.databinding.MainLayoutBinding
 import java.util.*
 
 // Used to both to send and return the current list of selected apps
-const val UNSELECTED_APPS_EXTRA = "tech.httptoolkit.android.UNSELECTED_APPS_EXTRA"
+const val UNSELECTED_APPS_EXTRA = "rckt.blockn.UNSELECTED_APPS_EXTRA"
 
 class ApplicationListActivity : AppCompatActivity(), SwipeRefreshLayout.OnRefreshListener,
   CoroutineScope by MainScope(), PopupMenu.OnMenuItemClickListener, View.OnClickListener {

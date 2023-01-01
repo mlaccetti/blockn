@@ -28,9 +28,7 @@ import rckt.blockn.vpn.transport.udp.UDPPacketFactory;
  * Used by the NIO thread, and run synchronously as part of that non-blocking loop.
  */
 class SocketChannelReader {
-
   private final String TAG = TagKt.getTAG(this);
-
   private final ClientPacketWriter writer;
 
   public SocketChannelReader(ClientPacketWriter writer) {
@@ -93,8 +91,8 @@ class SocketChannelReader {
           sendToRequester(buffer, len, session);
           buffer.clear();
         } else if (len == -1) {
-          Log.d(TAG, "End of data from remote server, will send FIN to client");
-          Log.d(TAG, "send FIN to: " + session);
+          // Log.d(TAG, "End of data from remote server, will send FIN to client");
+          // Log.d(TAG, "send FIN to: " + session);
           sendFin(session);
           session.setAbortingConnection(true);
         }
@@ -205,8 +203,7 @@ class SocketChannelReader {
           //write to client
           writer.write(packetData);
 
-          Log.d(TAG, "SDR: sent " + len + " bytes to UDP client, packetData.length: "
-            + packetData.length);
+          // Log.d(TAG, "SDR: sent " + len + " bytes to UDP client, packetData.length: " + packetData.length);
           buffer.clear();
         }
       } while (len > 0);

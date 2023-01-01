@@ -180,7 +180,7 @@ public class SessionHandler {
           } else if (session.isAckedToFin() && !tcpheader.isFIN()) {
             //the last ACK from client after FIN-ACK flag was sent
             manager.closeSession(destinationIP, destinationPort, sourceIP, sourcePort);
-            Log.d(TAG, "got last ACK after FIN, session is now closed.");
+            // Log.d(TAG, "got last ACK after FIN, session is now closed.");
           }
         }
         //received the last segment of data from vpn client
@@ -190,7 +190,7 @@ public class SessionHandler {
         } else if (tcpheader.isFIN()) {
           //fin from vpn client is the last packet
           //ack it
-          Log.d(TAG, "FIN from vpn client, will ack it.");
+          // Log.d(TAG, "FIN from vpn client, will ack it.");
           ackFinAck(ipHeader, tcpheader, session);
         } else if (tcpheader.isRST()) {
           resetConnection(ipHeader, tcpheader);
@@ -223,18 +223,18 @@ public class SessionHandler {
     byte[] data = TCPPacketFactory.createRstData(ip, tcp, dataLength);
 
     writer.write(data);
-    Log.d(TAG, "Sent RST Packet to client with dest => " +
+    /*Log.d(TAG, "Sent RST Packet to client with dest => " +
       PacketUtil.intToIPAddress(ip.getDestinationIP()) + ":" +
-      tcp.getDestinationPort());
+      tcp.getDestinationPort());*/
   }
 
   private void sendLastAck(IPv4Header ip, TCPHeader tcp) {
     byte[] data = TCPPacketFactory.createResponseAckData(ip, tcp, tcp.getSequenceNumber() + 1);
 
     writer.write(data);
-    Log.d(TAG, "Sent last ACK Packet to client with dest => " +
+    /*Log.d(TAG, "Sent last ACK Packet to client with dest => " +
       PacketUtil.intToIPAddress(ip.getDestinationIP()) + ":" +
-      tcp.getDestinationPort());
+      tcp.getDestinationPort());*/
   }
 
   private void ackFinAck(IPv4Header ip, TCPHeader tcp, Session session) {
@@ -246,8 +246,8 @@ public class SessionHandler {
     if (session != null) {
       session.cancelKey();
       manager.closeSession(session);
-      Log.d(TAG, "ACK to client's FIN and close session => " + PacketUtil.intToIPAddress(ip.getDestinationIP()) + ":" + tcp.getDestinationPort()
-        + "-" + PacketUtil.intToIPAddress(ip.getSourceIP()) + ":" + tcp.getSourcePort());
+      /*Log.d(TAG, "ACK to client's FIN and close session => " + PacketUtil.intToIPAddress(ip.getDestinationIP()) + ":" + tcp.getDestinationPort()
+        + "-" + PacketUtil.intToIPAddress(ip.getSourceIP()) + ":" + tcp.getSourcePort());*/
     }
   }
 
@@ -422,7 +422,7 @@ public class SessionHandler {
       nioService.registerSession(session);
 
       writer.write(packet.getBuffer());
-      Log.d(TAG, "Send SYN-ACK to client");
+      // Log.d(TAG, "Send SYN-ACK to client");
     }
   }
 

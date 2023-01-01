@@ -4,7 +4,6 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 
 object AppLabelCache {
-
   private val cache = HashMap<String, String>() // PackageName -> Label
 
   fun getAppLabel(packageManager: PackageManager, applicationInfo: ApplicationInfo): String {

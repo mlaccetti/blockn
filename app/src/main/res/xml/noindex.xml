@@ -1,5 +1,5 @@
 <search-engine>
   <!-- Disallow indexing of all Android deep linking URLs -->
-  <noindex uriPrefix="http://android.httptoolkit.tech" />
-  <noindex uriPrefix="https://android.httptoolkit.tech" />
+  <noindex uriPrefix="http://rckt.tech/blockn" />
+  <noindex uriPrefix="https://rckt.tech/blockn" />
 </search-engine>
